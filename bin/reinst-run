@@ -1,0 +1,203 @@
+#!/bin/bash
+
+#set -e
+
+STARTPWD="$(pwd)"
+cd -- "$(dirname "$0")" || exit 1
+BASEDIR="$(pwd)"
+cd -- "$STARTPWD" || exit 1
+
+source "$BASEDIR/lib/account.lib.sh" || exit 3
+
+
+function show_help()
+{
+	echo "Usage: $(basename "$0") <part-file>"
+}
+
+if [ $# -lt 1 ] || [ "$1" == "--help" ] || [ "$1" == "-h" ] || [ ! -f "$1" ]; then
+	show_help
+	exit 1
+fi
+
+# fatal_error <error message> [<exit code>]
+function fatal_error()
+{
+	echo >&2 "$1"
+	[ -z "$2" ] && exit 1
+	exit $2
+}
+
+function Used()
+{
+	local varname="$1" ; shift
+	#FIXME: recode with bash builtin:
+	if echo "$varname" | grep -v -q -- "^USE_"; then
+		echo >&2 "ERROR: variable '$varname' must prefixed by USED_"
+		exit 1
+	fi
+	[ "$(eval echo "\${$varname}")" == "yes" ] && return 0
+	[ "$(eval echo "\${$varname}")" == "no" ] && return 1
+	echo >&2 "$varname not defined"
+	return 1
+}
+function checkvar()
+{
+	if [ -z "$(eval echo "\${$1}")" ]; then
+		echo >&2 "ERROR: variable $1 is empty"
+		exit 1
+	fi
+	return 0
+}
+
+function INSTALL()
+{
+	apt-get install -q "$@"
+}
+function PURGE()
+{
+	apt-get remove --purge -q "$@"
+}
+
+function RESTORE()
+{
+	if [ -z "$BACKUP_UNPACK_DIR" ]; then
+		echo "ERROR: No such BACKUP_UNPACK_DIR"
+		exit 1
+	fi
+	cp -v -a "$BACKUP_UNPACK_DIR/"$1 "$2"
+}
+
+MESSAGE() {
+	echo "
+$1
+"
+}
+
+REMOVELINESINFILE() {
+	local a="$1"
+	#a="${a//\\/\\\\}" ;# \ -> \\
+	a="${a//\//\/}"    ;# / -> \/
+	printf -v pat '/%s/d' "$a"
+	# sed -ie pour le faire directement dans le fichier 
+	sed -e "$pat" "$2"
+}
+
+__checkbackupunpackdir() {
+	if [ -z "$BACKUP_UNPACK_DIR" ]; then
+		echo "ERROR: No such BACKUP_UNPACK_DIR"
+		exit 1
+	fi
+}
+
+__checkneval() {
+	local cmd="$1" ; shift
+	local file="$FILE1"
+	case "$1" in
+		-p|--pass*|pass*) file="$FILE2" ;;
+	esac
+	if [ -z "$file" ]; then
+		echo "You must set PASSWDFILE, SHADOWFILE, GROUPFILE and GSHADOWFILE"
+		exit 1
+	fi
+	[ -n "$PREFIXDIR" ] && file="$PREFIXDIR/$file"
+	if [ ! -f "$file" ]; then
+		echo "No such file $file"
+		exit 1
+	fi
+	eval "$cmd" "$1" "$2" "$file"
+}
+
+U() {
+	__checkbackupunpackdir
+	PREFIXDIR="$BACKUP_UNPACK_DIR" FILE1="$PASSWDFILE" FILE2="$SHADOWFILE" __checkneval usergetfield "$@"
+}
+G() {
+	PREFIXDIR="$BACKUP_UNPACK_DIR" FILE1="$GROUPFILE" FILE2="$GSHADOWFILE" __checkneval groupgetfield "$@"
+}
+
+U_LOCAL() {
+	PREFIXDIR="/etc" FILE1="passwd" FILE2="shadow" __checkneval usergetfield "$@"
+}
+
+G_LOCAL() {
+	PREFIXDIR="/etc" FILE1="group" FILE2="gshadow" __checkneval groupgetfield "$@"
+}
+
+# _optfix <optionname> <optionarg> [<optiondefaultarg>]
+# if optionarg not empty : return "<optionname> <optionarg>"
+# if optionarg is empty  : return "<optionname> <optiondefaultarg>"
+# if optionarg and optiondefaultarg are empty : return ""
+_optfix() {
+	local value="$2"
+	if [ -z "$2" ]; then
+		[ -z "$3" ] && return
+		value="$3"
+	fi
+	[ "$value" == "$EMPTYMARK" ] && value=""
+# FIXME: gecos ',,,' is quote : '\,\,\,' ! need fix...
+	printf '%s %q' "$1" "$value"
+}
+
+GROUPEXISTS() {
+	local g="$(G_LOCAL gid "$1")"
+	if [ -n "$g" ]; then
+		return 0
+	fi
+	return 1
+}
+
+ADDGROUP() {
+	if [ $# -ne 1 ]; then
+		echo >&2 "Usage: ADDGROUP <group>"
+		exit 1
+	fi
+	local g="$(G gid "$1")"
+	local g0="$(G_LOCAL gid "$1")"
+	if [ -z "$g0" ]; then
+		groupadd $(_optfix -g "$g") "$1"
+	elif [ "$g0" != "$g" ]; then
+		echo >&2 "WARNING: group $1 current gid=$g0 wanted gid=$g"
+		exit 1
+	fi
+}
+
+# ADDUSER <user>
+ADDUSER() {
+	if [ $# -ne 1 ]; then
+		echo >&2 "Usage: ADDUSER <user>"
+		exit 1
+	fi
+	local p="$(U passwd "$1")"
+	local u="$(U uid "$1")"
+	local g="$(U gid "$1")"
+	local c="$(U comm "$1")"
+	local d="$(U home "$1")"
+	local s="$(U shell "$1")"
+	local group="$(G group "$g")"
+	if ! GROUPEXISTS "$group"; then
+		groupadd $(_optfix -g "$g") "$group"
+	fi
+	adduser --disabled-password --no-create-home \
+		$(_optfix --uid "$u") \
+		$(_optfix --gid "$g") \
+		$(_optfix --home "$d") \
+		$(_optfix --shell "$s") \
+		$(_optfix --gecos "" "$EMPTYMARK") \
+		"$1"
+	usermod -p "$p" "$1"
+	#useless: echo adduser "$1" "$group"
+}
+
+PASSWDFILE=etc/passwd
+SHADOWFILE=etc/shadow
+GROUPFILE=etc/group
+GSHADOWFILE=etc/gshadow
+
+EMPTYMARK='@empty@'
+
+source "$BASEDIR/etc/custom.conf" || exit 1
+
+STEP="$1" ; shift
+source "$STEP"
+

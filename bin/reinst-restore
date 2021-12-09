@@ -1,0 +1,8 @@
+#!/bin/bash
+
+if [ -z "$BACKUP_UNPACK_DIR" ]; then
+	echo "ERROR: No such BACKUP_UNPACK_DIR"
+	exit 1
+fi
+cp -v -a "$BACKUP_UNPACK_DIR/"$1 "$2"
+

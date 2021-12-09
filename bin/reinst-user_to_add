@@ -1,0 +1,5 @@
+#!/bin/bash
+
+FILEP=/root/backup-unpack/etc/passwd
+
+comm -2 -3 <(cut -d: -f1 "$FILEP" | sort) <(cut -d: -f1 /etc/passwd |sort)

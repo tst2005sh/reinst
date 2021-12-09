@@ -1,0 +1,21 @@
+#!/bin/bash
+
+if [ $# -ne 1 ]; then
+	echo "Usage: $0 <group-to-sync>"
+	exit 0
+fi
+
+(
+IFS=:
+while read group x gid members
+do
+	(
+	IFS=,
+	for member in $members
+	do
+		echo "adduser $member $group"
+	done
+	)
+done
+) < <(grep -- "$1" /root/backup-unpack/etc/group)
+

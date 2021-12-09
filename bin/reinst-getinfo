@@ -1,0 +1,254 @@
+#!/bin/bash
+
+set -e
+
+error()
+{
+	echo >&2 "ERROR: $1"
+	exit 1
+}
+
+not_implemented_yet()
+{
+	error "NOT IMPLEMENTED YET"
+}
+
+usage()
+{
+	echo "$0 <command> [option]"
+	echo "<command>:
+  $MAINCMD"
+	echo "<options>:
+  --fileg  /etc/group
+  --filep  /etc/passwd
+  --filegs /etc/shadow
+  --fileps /etc/gshadow
+
+  --user <username>
+  --uid  <uid>
+  --gid  <gid>"
+	echo "misc:
+  -1
+  -N"
+}
+
+MAINCMD='group|gid|members|user|uid|passwd|shadow|gecos|home|shell|users'
+
+case "$1" in
+	group|gid|members|user|uid|passwd|shadow|gecos|home|shell|users) WANT="$1" ; shift ;;
+	*) usage ; exit 1
+esac
+
+
+_provide()
+{
+	local prov="$1" ; shift
+	local with="$1" ; shift
+	if [ -n "$PROV" ] && [ "$PROV" != "$prov" ]; then
+		echo >&2 "you already provide $PROV, can not ... with $with"
+		exit 1
+	fi
+	PROV="$prov"
+	WITH="$with"
+}
+
+PROV=""
+WITH=""
+while [ $# -gt 0 ]
+do
+	case "$1" in
+		--help|-h|help) usage ; exit 0 ;;
+		--fileg|--filegroup)	shift ; FILEG="$1"  ;;
+		--filep|--filepasswd)	shift ; FILEP="$1"  ;;
+		--filegs|--filegshadow)	shift ; FILEGS="$1" ;;
+		--fileps|--fileshadow)	shift ; FILEPS="$1" ;;
+		--uid)		shift ; _provide uid   "$1" ;;
+		--user)		shift ; _provide user  "$1" ;;
+		--group)	shift ; _provide group "$1" ;;
+		--gid)		shift ; _provide gid   "$1" ;;
+		*) error
+	esac
+	shift
+done
+
+[ -z "$FILEP"  ] && FILEP=/etc/passwd
+[ -z "$FILEG"  ] && FILEG=/etc/group
+[ -z "$FILEPS" ] && FILEPS=/etc/shadow
+[ -z "$FILEGS" ] && FILEGS=/etc/gshadow
+
+### /etc/passwd = USER : PASSWD : UID : GID : GECOS : HOME : SHELL
+FILEP_USER=1
+FILEP_PASSWD=2
+FILEP_UID=3
+FILEP_GID=4
+FILEP_GECOS=5
+FILEP_HOME=6
+FILEP_SHELL=7
+
+### /etc/shadow = USER : SHADOW : ...
+FILEPS_USER=1
+FILEPS_SHADOW=2
+
+### /etc/group = GROUP : PASSWD : GID : MEMBERS
+FILEG_GROUP=1
+FILEG_PASSWD=2
+FILEG_GID=3
+FILEG_MEMBERS=4
+
+### /etc/gshadow = GROUP : SHADOW : ...
+FILEGS_GROUP=1
+FILEGS_GSHADOW=2
+
+
+_f1search()
+{
+	local find="$1" ; shift
+	local once="$1"
+	[ -n "$once" ] && shift || once=true
+	(IFS=:
+	while read f1 f2end
+	do
+		if [ "$find" == "$f1" ]; then
+			echo "$f2end"
+			$once && break
+		fi
+	done
+	)
+}
+
+#(for each lines) prefix the content by the field <field> ; also add a ':' suffix
+# a:b:c | _prefixbyfieldn 2 -> b:a:b:c:
+_prefixbyfieldn()
+{
+	local field="$1" ; shift
+	awk -F: '{print $'"$field"'":"$0":"}'
+}
+
+_keep_field()
+{
+	cut -d: -f$1
+}
+
+_cut()
+{
+	cut -d: -f"$1" "$2"
+}
+
+# _search_in_and_keep <search-field> <keep-field> <provide> [<once>]
+_search_in_and_keep()
+{
+	local sfield="$1" ; shift
+	local kfield="$1" ; shift
+	_prefixbyfieldn "$sfield" | _f1search "$1" $2 | _keep_field "$kfield"
+}
+
+# _GENERIC <FIELDS> <FILE>  <search-field> <keep-field> <provide> [<once>]
+_GENERIC()
+{
+	_cut "$1" "$2" | _search_in_and_keep "$3" "$4" "$5" "$6"
+}
+
+uid_to_gid()
+{
+	_GENERIC "${FILEP_UID},${FILEP_GID}" "$FILEP"  1 2 "$1"
+}
+user_to_gid()
+{
+	_cut "${FILEP_USER},${FILEP_GID}" "$FILEP" 	| _search_in_and_keep 1 2 "$1"
+}
+group_to_gid()
+{
+	_cut "${FILEG_GROUP},${FILEG_GID}" "$FILEG" 	| _search_in_and_keep 1 2 "$1"
+}
+gid_to_gid()
+{
+	_cut "${FILEG_GID}" "$FILEG" 			| _search_in_and_keep 1 2 "$1"
+}
+gid_to_members()
+{
+	_cut "${FILEG_GID},${FILEG_MEMBERS}" "$FILEG"	| _search_in_and_keep 1 2 "$1"
+}
+group_to_members()
+{
+	_cut "${FILEG_GROUP},${FILEG_MEMBERS}" "$FILEG" | _search_in_and_keep 1 2 "$1"
+}
+user_to_uid()
+{
+	_cut "${FILEP_USER},${FILEP_UID}" "$FILEP" 	| _search_in_and_keep 1 2 "$1"
+}
+uid_to_uid()
+{
+	_cut "${FILEP_UID}" "$FILEP" 			| _search_in_and_keep 1 2 "$1"
+}
+uid_to_user()
+{
+	_cut "${FILEP_USER},${FILEP_UID}" "$FILEP" 	| _search_in_and_keep 2 1 "$1"
+}
+user_to_shadow()
+{
+	_cut "${FILEPS_USER},${FILEPS_SHADOW}" "$FILEPS" | _search_in_and_keep 1 2 "$1"
+}
+uid_to_shadow()
+{
+	local user="$(uid_to_user "$1")"
+	user_to_shadow "$user"
+}
+user_to_home()
+{
+	_cut "${FILEP_USER},${FILEP_HOME}" "$FILEP" 	| _search_in_and_keep 1 2 "$1"
+}
+uid_to_home()
+{
+	_cut "${FILEP_UID},${FILEP_HOME}" "$FILEP" 	| _search_in_and_keep 1 2 "$1"
+}
+user_to_gecos()
+{
+	_cut "${FILEP_USER},${FILEP_GECOS}" "$FILEP" 	| _search_in_and_keep 1 2 "$1"
+}
+uid_to_gecos()
+{
+	_cut "${FILEP_UID},${FILEP_GECOS}" "$FILEP" 	| _search_in_and_keep 1 2 "$1"
+}
+user_to_shell()
+{
+	_cut "${FILEP_USER},${FILEP_SHELL}" "$FILEP" 	| _search_in_and_keep 1 2 "$1"
+}
+uid_to_shell()
+{
+	_cut "${FILEP_UID},${FILEP_SHELL}" "$FILEP" 	| _search_in_and_keep 1 2 "$1"
+}
+gid_to_users()
+{
+	_cut "${FILEP_USER},${FILEP_GID}" "$FILEP" 	| _search_in_and_keep 2 1 "$1" false
+}
+gid_to_group()
+{
+	_cut "${FILEG_GROUP},${FILEG_GID}" "$FILEG"   | _search_in_and_keep 2 1 "$1"
+}
+
+
+FUNC="${PROV}_to_${WANT}"
+#$DEBUG && echo >&2 "FUNC $FUNC WITH $WITH"
+case "$FUNC" in
+	   uid_to_gid)  	"$FUNC"	"$WITH"	;;
+	  user_to_gid)  	"$FUNC" "$WITH"	;;
+	 group_to_gid)  	"$FUNC" "$WITH"	;;
+	   gid_to_gid)  	"$FUNC" "$WITH"	;;
+	   gid_to_members)	"$FUNC" "$WITH" ;;
+	   gid_to_users)	"$FUNC" "$WITH" ;;
+	   gid_to_group)	"$FUNC" "$WITH" ;;
+	 group_to_members)	"$FUNC" "$WITH" ;;
+	  user_to_uid)  	"$FUNC" "$WITH" ;;
+	   uid_to_uid)  	"$FUNC" "$WITH" ;;
+	   uid_to_user)		"$FUNC" "$WITH" ;;
+	  user_to_shadow)	"$FUNC" "$WITH" ;;
+	   uid_to_shadow)	"$FUNC" "$WITH" ;;
+	  user_to_home) 	"$FUNC" "$WITH" ;;
+	   uid_to_home) 	"$FUNC" "$WITH" ;;
+	  user_to_gecos)	"$FUNC" "$WITH" ;;
+	   uid_to_gecos)	"$FUNC" "$WITH" ;;
+	  user_to_shell)	"$FUNC" "$WITH" ;;
+	   uid_to_shell)	"$FUNC" "$WITH" ;;
+	   uid_to_*)		not_implemented_yet	;;
+	*) not_implemented_yet
+esac

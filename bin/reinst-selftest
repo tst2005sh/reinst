@@ -1,0 +1,14 @@
+#!/bin/bash
+
+set -e
+
+OK=true
+for cmd in grep cut sort comm awk useradd groupadd
+do
+	if ! command -v >/dev/null "$cmd"; then
+		echo "${cmd}: command not found"
+		OK=false
+	fi
+done
+
+$OK && echo "ok"

@@ -1,0 +1,19 @@
+#!/bin/bash
+
+if [ ! -f "$1" ]; then
+	echo "no such file $1"
+	exit 1
+fi
+export PAZ=script
+INSTALL()
+{
+	paz INSTALL "$@"
+	return $?
+}
+RESTORE()
+{
+	paz RESTORE "$@"
+	return $?
+}
+. "$1"
+

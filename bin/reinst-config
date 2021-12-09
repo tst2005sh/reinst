@@ -1,0 +1,12 @@
+#!/bin/bash
+
+FILTER="$1" ; shift
+
+# Export all variables found in the config file
+for var in $(grep '^[^#]\+=.\+$' "$REINSTALL_CONFIG" | cut -d= -f1 | sort -u)
+do
+	# FIXME: use printf -v ... %q ...
+	echo "$var=$(eval "echo \"\$$var\"")"
+done | grep -- "$FILTER"
+
+

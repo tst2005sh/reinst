@@ -1,0 +1,18 @@
+#!/bin/bash
+
+FILEG=/root/backup-unpack/etc/group
+CUR_G=/etc/group
+
+comm -1 -2 \
+	<(cut -d: -f1 "$FILEG" | sort) \
+	<(cut -d: -f1 "$CUR_G" | sort) \
+| while read group
+do
+	cgid="$(reinst getinfo gid --group $group --fileg "$CUR_G")"
+	wgid="$(reinst getinfo gid --group $group --fileg "$FILEG")"
+	if [ "$cgid" != "$wgid" ]; then
+		alreadyused=$(reinst getinfo group --gid $wgid --fileg "$CUR_G")
+		[ -n "$alreadyused" ] && [ "$alreadyused" != "$group" ] && BOOM="gid used by $alreadyused" || BOOM=""
+		echo "$group $cgid $wgid $BOOM"
+	fi
+done

@@ -1,0 +1,5 @@
+#!/bin/bash
+
+FILEG=/root/backup-unpack/etc/group
+
+comm -2 -3 <(cut -d: -f1 "$FILEG" | sort) <(cut -d: -f1 /etc/group |sort)

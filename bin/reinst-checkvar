@@ -1,0 +1,8 @@
+#!/bin/bash
+
+if [ -z "$(eval echo "\${$1}")" ]
+then
+	echo >&2 "ERROR: variable $1 is empty"
+	exit 1
+fi
+exit 0

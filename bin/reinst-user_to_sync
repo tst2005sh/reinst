@@ -1,0 +1,17 @@
+#!/bin/bash
+
+FILEP=/root/backup-unpack/etc/passwd
+
+
+
+comm -1 -2 \
+	<(cut -d: -f1 "$FILEP"    | sort) \
+	<(cut -d: -f1 /etc/passwd | sort) \
+| while read user
+do
+	cuid="$(reinst getinfo uid --user $user --filep /etc/passwd)"
+	wuid="$(reinst getinfo uid --user $user --filep "$FILEP")"
+	if [ "$cuid" != "$wuid" ]; then
+		echo "$user $cuid $wuid"
+	fi
+done

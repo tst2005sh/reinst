@@ -1,0 +1,3 @@
+#!/bin/bash
+
+echo "REINSTALL_CONFIG='$REINSTALL_CONFIG'; export REINSTALL_CONFIG;"

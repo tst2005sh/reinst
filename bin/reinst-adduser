@@ -1,0 +1,59 @@
+# !/bin/bash
+
+# TODO:
+# - extraire la partie test/ajout de group dans un addgroup/groupadd
+
+getinforef()
+{
+	FILEP="/root/backup-unpack/etc/passwd"
+	FILEG="/root/backup-unpack/etc/group"
+	FILEPS="/root/backup-unpack/etc/shadow"
+	FILEGS="/root/backup-unpack/etc/gshadow"
+	FILEP="$FILEP" FILEG="$FILEG" FILEPS="$FILEPS" FILEGS="$FILEGS" \
+		reinst getinfo "$@"
+}
+
+getinfocur()
+{
+	FILEP="/etc/passwd"
+	FILEG="/etc/group"
+	FILEPS="/etc/shadow"
+	FILEGS="/etc/gshadow"
+	FILEP="$FILEP" FILEG="$FILEG" FILEPS="$FILEPS" FILEGS="$FILEGS" \
+		reinst getinfo "$@"
+}
+
+check_targeted_group()
+{
+	[ -n "$(getinfocur gid --gid "$1")" ] && true || false
+	return $?
+}
+
+
+cmd1() {
+	local gid="$(getinforef		gid	--user "$1")"
+	local group="$(getinforef	group	--gid "$gid")"
+	if [ -z "$gid" ] || [ -z "$group" ]; then
+		echo "gid or group is empty (gid=$gid group=$group)"
+		echo "Nothing done, exit."
+		exit 1
+	fi
+	if ! check_targeted_group "$gid"; then
+		# create group
+		groupadd -g "$gid" "$group"
+	fi
+
+	useradd \
+		--no-create-home \
+		--comment	"$(getinforef  gecos	--user "$1")" \
+		--uid		"$(getinforef  uid	--user "$1")" \
+		--gid		"$(getinforef  gid	--user "$1")" \
+		--home-dir	"$(getinforef  home	--user "$1")" \
+		--password	"$(getinforef  shadow	--user "$1")" \
+		--shell		"$(getinforef  shell	--user "$1")" \
+		"$1"
+}
+
+
+cmd1 "$1"
+
